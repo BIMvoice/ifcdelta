@@ -157,6 +157,35 @@ try {
   await page.keyboard.press('Escape');
   check('escape clears the selection', (await page.textContent('.inspector h2')).includes('changes'));
 
+  // ── Resizable panels ──────────────────────────────────────────────────────
+  const widthOf = (selector) => page.locator(selector).evaluate((el) => el.getBoundingClientRect().width);
+  const dragHandle = async (selector, dx) => {
+    const handle = await page.locator(selector).boundingBox();
+    await page.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(handle.x + handle.width / 2 + dx, handle.y + handle.height / 2, { steps: 4 });
+    await page.mouse.up();
+  };
+  await dragHandle('.handle-left.handle-model', 60);
+  equal('dragging widens the left panel', await widthOf('.changes-panel'), 400);
+  await dragHandle('.handle-right.handle-model', -40);
+  equal('dragging the other way widens the right panel', await widthOf('.side-panel'), 420);
+  await dragHandle('.handle-left.handle-model', -900);
+  equal('a panel stops at its minimum', await widthOf('.changes-panel'), 280);
+  await dragHandle('.handle-right.handle-model', -900);
+  equal('and at its maximum', await widthOf('.side-panel'), 600);
+  await dragHandle('.handle-left.handle-model', 900);
+  check('it leaves the model room between the panels', 1440 - (await widthOf('.changes-panel')) - (await widthOf('.side-panel')) >= 300);
+  equal('the width is remembered', await page.evaluate(() => localStorage.getItem('ifcdelta.side')), '600');
+  await page.dblclick('.handle-right.handle-model');
+  equal('double-click resets it', await widthOf('.side-panel'), 380);
+  await page.dblclick('.handle-left.handle-model');
+  await page.focus('.handle-left.handle-model');
+  await page.keyboard.press('ArrowRight');
+  equal('arrow keys resize it too', await widthOf('.changes-panel'), 356);
+  await page.keyboard.press('ArrowLeft');
+  await page.locator('.handle-left.handle-model').blur();
+
   // ── Wipe ───────────────────────────────────────────────────────────────────
   await page.click('.version-bar button:text-is("Wipe")');
   await page.waitForSelector('.seam:not([hidden])', { timeout: 60000 });
@@ -213,6 +242,9 @@ try {
   await page.click('.class-row:has-text("IfcColumn")');
   const columnRows = await page.$$eval('.table-scroll .table-row:not(.table-header) .cell.strong', (cells) => cells.map((c) => c.textContent).filter(Boolean));
   check('the class list filters the table', columnRows.length > 0 && columnRows.every((name) => name.includes('olumn')), columnRows.join(', '));
+  await dragHandle('.handle-dock', -80);
+  equal('in the data view, the 3D and details column resizes together', [await widthOf('.stage'), await widthOf('.side-panel')].map(Math.round), [500, 500]);
+  await page.dblclick('.handle-dock');
   await page.close();
 
   // ── Same file twice ────────────────────────────────────────────────────────

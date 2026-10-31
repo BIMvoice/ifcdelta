@@ -8,6 +8,7 @@ import type { Change, ChangeKind, ElementRef, PropertyChange } from '../engine/t
 import { DeltaViewer, type PickHit } from '../viewer/delta-viewer';
 import { buildBaseOverlay, buildHeadOverlay, type VersionView } from '../viewer/overlay';
 import { h, icon, ICONS } from './dom';
+import { createPanelHandle } from './panel-resize';
 import { VirtualList } from './virtual-list';
 
 export interface WorkspaceOptions {
@@ -26,7 +27,7 @@ type VersionMode = VersionView | 'wipe';
 type Selection = { change: Change } | { unchanged: ElementRef } | null;
 
 const SIGIL: Record<ChangeKind, string> = { added: '+', modified: '~', deleted: '−' };
-const LIST_ROW = 58;
+const LIST_ROW = 50;
 const TABLE_ROW = 46;
 
 const titleOf = (change: Change) => change.name || change.ifcType;
@@ -94,8 +95,12 @@ export function createWorkspace(options: WorkspaceOptions) {
         'span',
         { class: 'change-text' },
         h('span', { class: 'change-title' }, titleOf(change)),
-        h('span', { class: 'change-sub' }, `${change.ifcType}${change.storey ? ` · ${change.storey}` : ''}`),
-        h('span', { class: 'change-what' }, changeSummary(change)),
+        h(
+          'span',
+          { class: 'change-sub' },
+          change.kind === 'modified' && h('span', { class: 'change-what' }, `${changeSummary(change)} · `),
+          `${change.ifcType}${change.storey ? ` · ${change.storey}` : ''}`,
+        ),
       ),
     );
   });
@@ -197,15 +202,47 @@ export function createWorkspace(options: WorkspaceOptions) {
     h(
       'div',
       { class: 'files' },
-      h('span', { class: 'file old', title: baseModel.fileName }, baseModel.fileName),
+      h('div', { class: 'file old', title: baseModel.fileName }, h('b', {}, 'OLD'), h('span', {}, baseModel.fileName)),
       icon(ICONS.arrow),
-      h('span', { class: 'file new', title: headModel.fileName }, headModel.fileName),
+      h('div', { class: 'file new', title: headModel.fileName }, h('b', {}, 'NEW'), h('span', {}, headModel.fileName)),
     ),
     tabs,
     h('button', { class: 'ghost', onclick: options.onChangeFiles }, 'Change files'),
   );
 
-  const root = h('div', { class: 'workspace', 'data-view': state.view }, topbar, h('div', { class: 'panels' }, changesPanel, tablePanel, h('div', { class: 'center' }), sidePanel));
+  // Each panel keeps its width between sessions. What sits beside it always keeps its room.
+  const GUTTERS = 56;
+  const CENTRE_MIN = 300;
+  const TABLE_MIN = 520;
+  const onPanelResized = () => updateClearWidth();
+  const leftHandle = createPanelHandle(
+    { cssVar: '--left-w', storageKey: 'ifcdelta.left', label: 'Resize the changes panel', initial: 340, min: 280, max: 520, side: 'left', reserved: () => rightHandle.width + GUTTERS + CENTRE_MIN },
+    onPanelResized,
+  );
+  const rightHandle = createPanelHandle(
+    { cssVar: '--side-w', storageKey: 'ifcdelta.side', label: 'Resize the details panel', initial: 380, min: 300, max: 600, side: 'right', reserved: () => leftHandle.width + GUTTERS + CENTRE_MIN },
+    onPanelResized,
+  );
+  const dockHandle = createPanelHandle(
+    { cssVar: '--dock-w', storageKey: 'ifcdelta.dock', label: 'Resize the 3D and details column', initial: 420, min: 340, max: 640, side: 'right', reserved: () => GUTTERS + TABLE_MIN },
+    onPanelResized,
+  );
+  leftHandle.element.classList.add('handle-model');
+  rightHandle.element.classList.add('handle-model');
+  dockHandle.element.classList.add('handle-dock');
+  const handles = [leftHandle, rightHandle, dockHandle];
+  const onWindowResize = () => {
+    for (const handle of handles) handle.refit();
+    updateClearWidth();
+  };
+  window.addEventListener('resize', onWindowResize);
+
+  const root = h(
+    'div',
+    { class: 'workspace', 'data-view': state.view },
+    topbar,
+    h('div', { class: 'panels' }, changesPanel, leftHandle.element, tablePanel, h('div', { class: 'center' }), rightHandle.element, dockHandle.element, sidePanel),
+  );
 
   // ── Stage controls, which live inside the 3D stage ─────────────────────────
   const versionBar = h('div', { class: 'segmented version-bar', 'data-stage-ui': true, role: 'group', 'aria-label': 'Which version to show' });
@@ -220,7 +257,7 @@ export function createWorkspace(options: WorkspaceOptions) {
   const stageMessage = h('p', { class: 'stage-message', role: 'status', hidden: true });
   const fitButton = h(
     'button',
-    { class: 'icon-btn fit-btn', 'data-stage-ui': true, 'aria-label': 'Fit the model in view', title: 'Fit the model in view', onclick: () => viewer?.fit() },
+    { class: 'icon-btn fit-btn', 'data-stage-ui': true, 'aria-label': 'Fit the model in view', title: 'Fit the model in view', onclick: () => fitToStage() },
     icon(ICONS.fit),
   );
   const seam = h('div', {
@@ -341,7 +378,11 @@ export function createWorkspace(options: WorkspaceOptions) {
       },
     });
   }
-  if (viewer) viewer.onPick = onPick;
+  if (viewer) {
+    viewer.onPick = onPick;
+    viewer.isHoverable = (hit) => (hit.id >= baseOffset ? byBaseId.has(hit.id - baseOffset) : byHeadId.has(hit.id));
+    viewer.onFirstInteraction = () => help.classList.add('used');
+  }
 
   function renderInspector() {
     const selection = state.selection;
@@ -351,7 +392,19 @@ export function createWorkspace(options: WorkspaceOptions) {
           'div',
           { class: 'inspector-empty' },
           h('h2', {}, total ? plural(total, 'change') : 'No differences'),
-          h('p', {}, total ? 'Pick one in the list or click a coloured element to see exactly what changed.' : `Every compared element is the same in both versions (${summary.unchanged.toLocaleString()}).`),
+          h(
+            'div',
+            { class: 'stat-grid' },
+            ...(
+              [
+                ['added', summary.added, 'Added'],
+                ['modified', summary.modified, 'Modified'],
+                ['deleted', summary.deleted, 'Deleted'],
+                ['unchanged', summary.unchanged, 'Unchanged'],
+              ] as const
+            ).map(([kind, count, label]) => h('div', { class: `stat ${kind}` }, h('b', {}, count.toLocaleString()), h('span', {}, label))),
+          ),
+          h('p', {}, total ? 'Pick a change in the list or click a coloured element to see exactly what changed.' : 'Every compared element is the same in both versions.'),
         ),
       );
       return;
@@ -504,7 +557,7 @@ export function createWorkspace(options: WorkspaceOptions) {
     if (summary.reidentified) items.push(`${plural(summary.reidentified, 'element')} got a new GlobalId but ${summary.reidentified === 1 ? 'is' : 'are'} otherwise identical, so ${summary.reidentified === 1 ? 'it counts' : 'they count'} as unchanged.`);
     if (summary.ambiguousGroups) items.push(`${plural(summary.ambiguousGroups, 'group')} of identical elements could not be paired one to one, so ${summary.ambiguousGroups === 1 ? 'it reads' : 'they read'} as added and deleted.`);
     if (!summary.geometryCompared) items.push('Geometry could not be compared because one version has no geometry. Only data differences are listed.');
-    items.push(`${summary.unchanged.toLocaleString()} unchanged`);
+    notes.hidden = items.length === 0;
     notes.replaceChildren(...items.map((text) => h('p', {}, text)));
   }
 
@@ -569,11 +622,14 @@ export function createWorkspace(options: WorkspaceOptions) {
     fitToStage();
   }
 
-  function fitToStage() {
-    if (!viewer) return;
+  function updateClearWidth() {
     const panels = view3dPanelsWidth();
-    viewer.setClearWidth(panels === null ? null : Math.max(1, window.innerWidth - panels));
-    viewer.fit();
+    viewer?.setClearWidth(panels === null ? null : Math.max(1, window.innerWidth - panels));
+  }
+
+  function fitToStage() {
+    updateClearWidth();
+    viewer?.fit();
   }
 
   /** Space the side panels take up over the full-bleed stage. Docked or stacked, they cover none of it. */
@@ -587,7 +643,7 @@ export function createWorkspace(options: WorkspaceOptions) {
     rows = tableRows(changes, state.filters);
     renderFilters();
     countNumber.textContent = shownChanges.length.toLocaleString();
-    countLabel.textContent = total === shownChanges.length ? plural(total, 'change').replace(/^[\d,. ]+/, '') : `of ${plural(total, 'change')}`;
+    countLabel.textContent = total === shownChanges.length ? (total === 1 ? 'change' : 'changes') : `of ${plural(total, 'change')} shown`;
     list.setItems(shownChanges);
     table.setItems(rows);
     const emptyText = total === 0 ? 'These two versions are identical.' : 'No changes match these filters.';
@@ -610,7 +666,7 @@ export function createWorkspace(options: WorkspaceOptions) {
     } else if (e.key === 'Escape') {
       select(null);
     } else if (e.key.toLowerCase() === 'f' && !e.metaKey && !e.ctrlKey) {
-      viewer?.fit();
+      fitToStage();
     }
   };
   window.addEventListener('keydown', onKey);
@@ -624,10 +680,12 @@ export function createWorkspace(options: WorkspaceOptions) {
     root,
     /** Runs once the panels are in the page, so the first fit can measure them. */
     mounted() {
+      for (const handle of handles) handle.restore();
       setView('model');
     },
     destroy() {
       window.removeEventListener('keydown', onKey);
+      window.removeEventListener('resize', onWindowResize);
       stageUi.remove();
       root.remove();
     },

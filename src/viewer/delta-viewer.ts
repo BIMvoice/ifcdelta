@@ -1,12 +1,19 @@
 import type { MeshData } from '@ifc-lite/geometry';
-import { Renderer, type PickResult } from '@ifc-lite/renderer';
+import { DEFAULT_OVERLAY_THEME, Renderer, type PickResult } from '@ifc-lite/renderer';
 import type { Box } from '../engine/load';
 import type { Overlay } from './overlay';
 
 /** How see-through unchanged elements are in the X-ray. */
 const GHOST_ALPHA = 0.11;
-/** Matches --bg in style.css. */
-const CLEAR: [number, number, number, number] = [0.02, 0.031, 0.055, 1];
+/** See-through, so the stage background in style.css shows behind the model. */
+const CLEAR: [number, number, number, number] = [0, 0, 0, 0];
+/** Crisp lines and soft contact shadows, so solid elements do not read as flat colour. */
+const ENHANCEMENT = {
+  enabled: true,
+  separationLines: { enabled: true, quality: 'high', intensity: 0.55, radius: 1 },
+  contactShading: { quality: 'low', intensity: 0.45, radius: 0.6 },
+} as const;
+const HOVER_INTERVAL_MS = 70;
 const CLICK_TOLERANCE = 4;
 const FRAME_MS = 450;
 
@@ -17,6 +24,11 @@ function union(a: Box | undefined, b: Box | undefined): Box | undefined {
     min: [Math.min(a.min[0], b.min[0]), Math.min(a.min[1], b.min[1]), Math.min(a.min[2], b.min[2])],
     max: [Math.max(a.max[0], b.max[0]), Math.max(a.max[1], b.max[1]), Math.max(a.max[2], b.max[2])],
   };
+}
+
+/** White selection keeps the change's own colour readable around it, where the default blue replaced it. */
+function applyTheme(renderer: Renderer) {
+  renderer.setOverlayTheme({ ...DEFAULT_OVERLAY_THEME, selection: [1, 1, 1, 1] });
 }
 
 const vec = (p: [number, number, number]) => ({ x: p[0], y: p[1], z: p[2] });
@@ -45,6 +57,13 @@ export class DeltaViewer {
   private drag: { x: number; y: number; startX: number; startY: number; pan: boolean } | null = null;
   private resizeObserver: ResizeObserver;
   private clearWidth: number | null = null;
+  private hoverId: number | null = null;
+  private lastHoverPick = 0;
+  private hoverPicking = false;
+  /** Decides which hovered elements are worth outlining: the changed ones. */
+  isHoverable: (hit: PickHit) => boolean = () => false;
+  /** Fires the first time someone moves the camera. */
+  onFirstInteraction: () => void = () => {};
   onPick: (hit: PickHit | null) => void = () => {};
 
   private constructor(private stage: HTMLElement, canvas: HTMLCanvasElement, private baseCanvas: HTMLCanvasElement) {
@@ -58,6 +77,7 @@ export class DeltaViewer {
     if (!('gpu' in navigator)) throw new Error('WebGPU is not available in this browser.');
     const viewer = new DeltaViewer(stage, canvas, baseCanvas);
     await viewer.head.renderer.init();
+    applyTheme(viewer.head.renderer);
     viewer.resize();
     viewer.start();
     return viewer;
@@ -98,7 +118,9 @@ export class DeltaViewer {
 
   frame(box: Box | undefined) {
     if (!box) return;
-    void this.head.renderer.getCamera().frameBounds(vec(box.min), vec(box.max), FRAME_MS, 3);
+    const width = this.stage.getBoundingClientRect().width;
+    const padding = this.clearWidth ? Math.max(3, (2.2 * width) / this.clearWidth) : 3;
+    void this.head.renderer.getCamera().frameBounds(vec(box.min), vec(box.max), FRAME_MS, padding);
     this.invalidate();
   }
 
@@ -124,6 +146,7 @@ export class DeltaViewer {
     if (this.base) return;
     const renderer = new Renderer(this.baseCanvas);
     await renderer.init();
+    applyTheme(renderer);
     const pane: Pane = { renderer, canvas: this.baseCanvas, overlay: null, selected: new Set(), dirtyOverlay: false };
     this.base = pane;
     this.resize();
@@ -205,6 +228,8 @@ export class DeltaViewer {
       ghostAlpha: GHOST_ALPHA,
       transparencyOverrides: overlay?.alpha,
       selectedIds: pane.selected,
+      hoverOutline: pane === this.head && this.hoverId !== null ? { id: this.hoverId } : null,
+      visualEnhancement: ENHANCEMENT,
     });
   }
 
@@ -226,7 +251,11 @@ export class DeltaViewer {
       stage.classList.add('dragging');
     });
     stage.addEventListener('pointermove', (e) => {
-      if (!this.drag) return;
+      if (!this.drag) {
+        if (e.pointerType === 'mouse') void this.hoverAt(e);
+        return;
+      }
+      this.onFirstInteraction();
       const dx = e.clientX - this.drag.x;
       const dy = e.clientY - this.drag.y;
       this.drag.x = e.clientX;
@@ -252,6 +281,7 @@ export class DeltaViewer {
       'wheel',
       (e) => {
         e.preventDefault();
+        this.onFirstInteraction();
         const rect = stage.getBoundingClientRect();
         this.head.renderer.getCamera().zoom(e.deltaY, false, e.clientX - rect.left, e.clientY - rect.top, rect.width, rect.height);
         this.invalidate();
@@ -259,6 +289,29 @@ export class DeltaViewer {
       { passive: false },
     );
     stage.addEventListener('contextmenu', (e) => e.preventDefault());
+  }
+
+  /** Outline a changed element under the pointer, at most every few frames. */
+  private async hoverAt(e: PointerEvent) {
+    const now = performance.now();
+    if (this.hoverPicking || now - this.lastHoverPick < HOVER_INTERVAL_MS) return;
+    if (this.wipeAt !== null || (e.target as HTMLElement).closest('[data-stage-ui]')) return this.setHover(null);
+    this.lastHoverPick = now;
+    this.hoverPicking = true;
+    try {
+      const rect = this.stage.getBoundingClientRect();
+      const hit = await this.head.renderer.pick(e.clientX - rect.left, e.clientY - rect.top, { hiddenIds: this.head.overlay?.hidden });
+      this.setHover(hit && this.isHoverable({ side: 'head', id: hit.expressId }) ? hit.expressId : null);
+    } finally {
+      this.hoverPicking = false;
+    }
+  }
+
+  private setHover(id: number | null) {
+    if (id === this.hoverId) return;
+    this.hoverId = id;
+    this.stage.classList.toggle('over-change', id !== null);
+    this.invalidate();
   }
 
   private async pickAt(e: PointerEvent) {

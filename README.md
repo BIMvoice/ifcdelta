@@ -14,7 +14,7 @@ Choose an old and a new IFC file. ifcdelta lists every element that was added, m
 - **Measured geometry:** a moved element shows its old and new position on each axis, and a reshaped one its old and new size and volume.
 - **Re-exported models:** an element whose GlobalId changed is paired by its content. If it is otherwise identical it counts as unchanged instead of a false delete and add.
 
-Controls: drag to orbit, shift-drag to pan, scroll to zoom, click to select, `↑` `↓` to step through changes, `F` to fit, `Esc` to clear.
+Controls: drag to orbit, shift-drag to pan, scroll to zoom, click to select, `↑` `↓` to step through changes, `F` to fit, `Esc` to clear. Drag the gap beside a side panel to resize it, and double-click it to reset.
 
 ## Getting started
 
