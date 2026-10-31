@@ -2,6 +2,8 @@
 
 **See exactly what changed between two versions of an IFC model, in geometry and in data.**
 
+Use it at [ifcdelta.bimvoice.com](https://ifcdelta.bimvoice.com), or run it yourself.
+
 Choose an old and a new IFC file. ifcdelta lists every element that was added, modified or deleted, shows each one in 3D, and tells you the old and new value of everything that differs. Everything runs in your browser: your files are never uploaded.
 
 ## What it shows
@@ -30,7 +32,7 @@ npm run dev
 | `npm test` | Unit tests |
 | `npm run check:browser` | Run the production build in headless Chromium against `fixtures/`, a pair where every difference is known |
 
-To host it, the server must send `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp`, because IFClite's WASM geometry uses `SharedArrayBuffer`. GitHub Pages cannot set these headers.
+To host it, the server must send `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp`, because IFClite's WASM geometry uses `SharedArrayBuffer`. `vercel.json` sets them on Vercel. GitHub Pages cannot set these headers.
 
 ## How it works
 
