@@ -2,7 +2,7 @@
 // known. Run `npm run build` first. Set SCREENSHOTS=<folder> to also save what each step looks like.
 // Usage: npm run check:browser
 import { spawn } from 'node:child_process';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, readFileSync } from 'node:fs';
 import { chromium } from 'playwright';
 
 const PORT = 4179;
@@ -181,6 +181,31 @@ try {
   check('and is not covered by a panel', topElement);
   const tableText = await page.textContent('.table-scroll');
   check('table rows carry old and new values', tableText.includes('REI 60') && tableText.includes('REI 90') && tableText.includes('3.45 m'));
+  check('the table has a GlobalId column', (await page.$$eval('.table-header span', (h) => h.map((e) => e.textContent))).includes('GlobalId'));
+  check('rows show the element GlobalId', tableText.includes('3Delta0000000000000011'), tableText.slice(0, 200));
+
+  const exported = async (button) => {
+    const [download] = await Promise.all([page.waitForEvent('download'), page.click(`.export-btn:has-text("${button}")`)]);
+    return { name: download.suggestedFilename(), text: readFileSync(await download.path(), 'utf8') };
+  };
+  const rowsOf = (csv) => csv.replace(/^\uFEFF/, '').trimEnd().split('\r\n');
+  let file = await exported('Export elements');
+  equal('the elements file is named after both versions', file.name, 'tower-v1_to_tower-v2_elements.csv');
+  check('it opens correctly in Excel, with a byte order mark', file.text.charCodeAt(0) === 0xfeff);
+  equal('it has one row per changed element, plus a header', rowsOf(file.text).length, 9);
+  check('with GlobalIds', rowsOf(file.text)[0].includes('GlobalId') && file.text.includes('3Delta0000000000000020'));
+  check('and the old GlobalId of an element paired by content', file.text.includes('3Delta0000000000000031') && file.text.includes('3Delta0000000000000017'));
+  file = await exported('Export properties');
+  check('the properties file carries old and new values', file.text.includes('REI 60') && file.text.includes('REI 120') && file.text.includes('3.45 m'));
+  await page.click('.tally-item.deleted');
+  file = await exported('Export elements');
+  equal('export follows the filters on screen', rowsOf(file.text).length, 2);
+  check('and it is the deleted column', rowsOf(file.text)[1].startsWith('Deleted') && file.text.includes('Removed column'));
+  await page.click('.tally-item.all');
+  await page.fill('.table-tools input', 'nothing matches this');
+  check('export is disabled when nothing is shown', await page.isDisabled('.export-btn:has-text("Export elements")'));
+  await page.fill('.table-tools input', '');
+
   await page.fill('.table-tools input', 'FireRating');
   const filteredRows = await page.$$eval('.table-scroll .table-row:not(.table-header)', (rows) => rows.length);
   equal('table search narrows to property rows', filteredRows, 2);

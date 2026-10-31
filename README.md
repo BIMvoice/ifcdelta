@@ -7,7 +7,8 @@ Choose an old and a new IFC file. ifcdelta lists every element that was added, m
 ## What it shows
 
 - **3D model:** unchanged elements fade to a blue X-ray, and changes stand out in colour. Switch between Overlay, Old, New, and a Wipe with a seam you can drag across the two versions.
-- **Data table:** one row per changed property, with old and new values, across property sets, quantities, attributes, materials, classifications and assigned types. Search it, or filter by kind of change, by IFC class, and by geometry or data.
+- **Data table:** one row per changed property, with the element's GlobalId and old and new values, across property sets, quantities, attributes, materials, classifications and assigned types. Search it, or filter by kind of change, by IFC class, and by geometry or data.
+- **Export:** save what the table shows as CSV for Excel, as a list of elements or a list of changed properties. Filters apply.
 - **Measured geometry:** a moved element shows its old and new position on each axis, and a reshaped one its old and new size and volume.
 - **Re-exported models:** an element whose GlobalId changed is paired by its content. If it is otherwise identical it counts as unchanged instead of a false delete and add.
 
@@ -53,7 +54,7 @@ The code in this repo connects those pieces and adds what they leave to the appl
 - Differences under 1 mm count as unchanged. That tolerance filters out export noise.
 - `IfcOpeningElement` is left out, because an opening is only the void between a wall and a door. A wall whose opening changed still shows as changed.
 - Products with no geometry of their own, such as an `IfcSite`, are compared on their data only. A move of one of those is not detected.
-- It compares two files. It does not manage revisions, and it does not edit or export anything.
+- It compares two files. It does not manage revisions, and it does not edit IFC files.
 
 ## License
 

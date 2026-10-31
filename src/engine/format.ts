@@ -1,4 +1,4 @@
-import type { Axes, GeometryDelta, PropertyChange } from './types';
+import type { Axes, Change, ChangeKind, GeometryDelta, PropertyChange } from './types';
 
 /** Round for display and drop float noise: 3.6000000000000001 reads as 3.6. */
 export function formatNumber(value: number, digits = 4): string {
@@ -60,4 +60,18 @@ export function geometryRows(delta: GeometryDelta | undefined): PropertyChange[]
   }
   if (rows.length === 0) add('Shape', null, 'Changed, same extents');
   return rows;
+}
+
+export const KIND_LABEL: Record<ChangeKind, string> = { added: 'Added', modified: 'Modified', deleted: 'Deleted' };
+
+export const plural = (n: number, one: string, many = `${one}s`) => `${n.toLocaleString()} ${n === 1 ? one : many}`;
+
+/** What happened to an element, in a few words. */
+export function changeSummary(change: Change): string {
+  if (change.kind !== 'modified') return KIND_LABEL[change.kind];
+  const parts: string[] = [];
+  if (change.geometry) parts.push(describeGeometry(change.geometryDelta));
+  const dataRows = change.properties.filter((p) => p.scope === 'data').length;
+  if (change.data) parts.push(dataRows ? plural(dataRows, 'property', 'properties') : 'Data changed');
+  return parts.join(' · ');
 }

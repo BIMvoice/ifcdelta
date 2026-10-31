@@ -1,6 +1,7 @@
 import { classCounts, kindCounts, matches, NO_FILTERS, tableRows, type Filters, type TableRow } from '../app/filters';
 import { elementRows, type Comparison } from '../engine/compare';
-import { describeGeometry } from '../engine/format';
+import { elementsCsv, exportFileName, globalIdOf, propertiesCsv } from '../app/export';
+import { changeSummary, KIND_LABEL, plural } from '../engine/format';
 import type { LoadedModel } from '../engine/load';
 import type { FlatRow } from '../engine/properties';
 import type { Change, ChangeKind, ElementRef, PropertyChange } from '../engine/types';
@@ -25,21 +26,10 @@ type VersionMode = VersionView | 'wipe';
 type Selection = { change: Change } | { unchanged: ElementRef } | null;
 
 const SIGIL: Record<ChangeKind, string> = { added: '+', modified: '~', deleted: '−' };
-const KIND_LABEL: Record<ChangeKind, string> = { added: 'Added', modified: 'Modified', deleted: 'Deleted' };
 const LIST_ROW = 58;
 const TABLE_ROW = 46;
 
-const plural = (n: number, one: string, many = `${one}s`) => `${n.toLocaleString()} ${n === 1 ? one : many}`;
 const titleOf = (change: Change) => change.name || change.ifcType;
-
-function changeSummary(change: Change): string {
-  if (change.kind !== 'modified') return KIND_LABEL[change.kind];
-  const parts: string[] = [];
-  if (change.geometry) parts.push(describeGeometry(change.geometryDelta));
-  const dataRows = change.properties.filter((p) => p.scope === 'data').length;
-  if (change.data) parts.push(dataRows ? plural(dataRows, 'property', 'properties') : 'Data changed');
-  return parts.join(' · ');
-}
 
 function sigil(kind: ChangeKind) {
   return h('span', { class: `sigil ${kind}`, 'aria-hidden': 'true' }, SIGIL[kind]);
@@ -121,6 +111,8 @@ export function createWorkspace(options: WorkspaceOptions) {
   // ── Data table ─────────────────────────────────────────────────────────────
   const tally = h('div', { class: 'tally', role: 'group', 'aria-label': 'Filter by kind of change' });
   const tableSearch = search();
+  const exportElements = h('button', { class: 'ghost export-btn', title: 'One row per element, with the filters above applied', onclick: () => download('elements', elementsCsv(shownChanges)) }, 'Export elements');
+  const exportProperties = h('button', { class: 'ghost export-btn', title: 'One row per changed property, with the filters above applied', onclick: () => download('properties', propertiesCsv(rows)) }, 'Export properties');
   const tableScopes = h('div', { class: 'segmented', role: 'group', 'aria-label': 'Filter by geometry or data' });
   const tableScroll = h('div', { class: 'table-scroll scroll', role: 'region', 'aria-label': 'Property changes', tabindex: '0' });
   const tableInner = h('div', { class: 'table-inner' });
@@ -129,7 +121,7 @@ export function createWorkspace(options: WorkspaceOptions) {
     { class: 'table-row table-header' },
     h('span', {}),
     h('span', {}, 'Element'),
-    h('span', {}, 'Class'),
+    h('span', {}, 'GlobalId'),
     h('span', {}, 'Storey'),
     h('span', {}, 'Property'),
     h('span', {}, 'Old'),
@@ -150,8 +142,10 @@ export function createWorkspace(options: WorkspaceOptions) {
         'button',
         { class: `table-row${first ? ' first' : ''}${selected ? ' selected' : ''}`, onclick: () => select({ change }, true) },
         first ? sigil(change.kind) : h('span', {}),
-        h('span', { class: 'cell strong', title: first ? titleOf(change) : null }, first ? titleOf(change) : ''),
-        h('span', { class: 'cell mono dim', title: first ? change.ifcType : null }, first ? change.ifcType : ''),
+        first
+          ? h('span', { class: 'cell-stack', title: `${titleOf(change)} (${change.ifcType})` }, h('span', { class: 'cell strong' }, titleOf(change)), h('span', { class: 'cell mono small dim' }, change.ifcType))
+          : h('span', {}),
+        h('span', { class: 'cell mono guid-cell', title: first ? globalIdOf(change) : null }, first ? globalIdOf(change) : ''),
         h('span', { class: 'cell dim', title: first ? change.storey ?? null : null }, first ? change.storey ?? '' : ''),
         property
           ? h('span', { class: 'cell-stack', title: `${property.group} / ${property.name}` }, h('span', { class: 'cell' }, property.name), h('span', { class: 'cell mono small dim' }, property.group))
@@ -166,10 +160,23 @@ export function createWorkspace(options: WorkspaceOptions) {
     'section',
     { class: 'panel table-panel', 'aria-label': 'Data changes' },
     tally,
-    h('div', { class: 'table-tools' }, tableSearch, tableScopes),
+    h(
+      'div',
+      { class: 'table-tools' },
+      tableSearch,
+      tableScopes,
+      h('div', { class: 'export-group', role: 'group', 'aria-label': 'Export what is shown as CSV' }, exportElements, exportProperties),
+    ),
     tableScroll,
     tableEmpty,
   );
+
+  function download(what: string, csv: string) {
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+    const link = h('a', { href: url, download: exportFileName(baseModel.fileName, headModel.fileName, what) });
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
 
   function valueCell(value: string | null, side: 'before' | 'after') {
     return h('span', { class: `cell mono value ${side}${value === null ? ' none' : ''}`, title: value }, value ?? '—');
@@ -586,6 +593,8 @@ export function createWorkspace(options: WorkspaceOptions) {
     const emptyText = total === 0 ? 'These two versions are identical.' : 'No changes match these filters.';
     emptyList.hidden = shownChanges.length > 0;
     emptyList.textContent = emptyText;
+    exportElements.disabled = shownChanges.length === 0;
+    exportProperties.disabled = rows.length === 0;
     tableEmpty.hidden = rows.length > 0;
     tableEmpty.textContent = emptyText;
     renderOverlay();
