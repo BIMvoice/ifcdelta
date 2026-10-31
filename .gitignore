@@ -1,0 +1,8 @@
+node_modules
+dist
+.scratch
+*.local
+.DS_Store
+*.ifc
+*.ifcZIP
+!fixtures/*.ifc

@@ -1,0 +1,32 @@
+{
+  "name": "ifcdelta",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "See exactly what changed between two versions of an IFC model, in geometry and in data. Built on IFClite.",
+  "license": "MPL-2.0",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "check:browser": "node scripts/check-browser.mjs"
+  },
+  "dependencies": {
+    "@fontsource-variable/geist": "^5.3.0",
+    "@fontsource-variable/geist-mono": "^5.3.0",
+    "@ifc-lite/data": "^6.4.0",
+    "@ifc-lite/diff": "^0.13.0",
+    "@ifc-lite/geometry": "^8.0.2",
+    "@ifc-lite/parser": "^9.8.0",
+    "@ifc-lite/renderer": "^6.5.2"
+  },
+  "devDependencies": {
+    "@webgpu/types": "^0.1.60",
+    "playwright": "^1.64.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.4",
+    "vitest": "^5.0.3"
+  }
+}
