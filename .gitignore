@@ -7,3 +7,4 @@ dist
 *.ifcZIP
 !fixtures/*.ifc
 .vercel
+.env*
